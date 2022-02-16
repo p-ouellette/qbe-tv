@@ -1,0 +1,3 @@
+[submodule "qbe-sml"]
+	path = qbe-sml
+	url = git@github.com:pauloue/qbe-sml.git
