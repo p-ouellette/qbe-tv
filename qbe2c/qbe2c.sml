@@ -32,9 +32,11 @@ struct
 
   fun saybasety out = (say out) o basety
 
-  fun saycon out (T.Int i) = say out (Int.toString i)
-    | saycon out (T.Flts f) = say out (Real.toString f)
-    | saycon out (T.Fltd f) = say out (Real.toString f)
+  val fixsign = String.map (fn #"~" => #"-" | c => c)
+
+  fun saycon out (T.Int i) = say out (fixsign(Int64.toString i))
+    | saycon out (T.Flts f) = say out (fixsign(Real.toString f))
+    | saycon out (T.Fltd f) = say out (fixsign(Real.toString f))
 
   fun sayval out (T.Tmp name) = sayid out name
     | sayval out (T.Glo name) = sayid out name
@@ -131,16 +133,14 @@ struct
        | T.Truncd a => say "truncd"
        | T.Cast a => say "cast"
        | T.Copy a => say "copy"
-       | T.Call {name, args, ...} => say "copy"
+       | T.Call {name, args, ...} => say "call"
        | T.Vastart a => say "vastart"
        | T.Vaarg a => say "vaarg"
        | T.Phi args => say "phi"
        | _ => raise Fail "impossible"
     end
 
-  fun trdef out (T.Type _) = ()
-    | trdef out (T.OpaqueType _) = ()
-    | trdef out (T.Data _) = ()
+  fun trdef out (T.Data _) = ()
     | trdef out (T.Function func) = let
         val say = say out
         fun sayparam (ty, name) =
@@ -174,6 +174,7 @@ struct
              | _ => app sayparam params;
           say ") {\n"; app sayblk blocks; say "}\n"
         end
+    | trdef _ _ = ()
 
   fun main (_, [fileName]) = let
         val defs = QbeParse.parse fileName
