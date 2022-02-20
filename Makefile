@@ -11,6 +11,6 @@ bin:
 clean:
 	$(MAKE) -C qbe-sml clean
 	$(MAKE) -C qbe2c clean
-	rm bin/qbe2c
+	rm -rf bin
 
 .PHONY: qbe2c clean
