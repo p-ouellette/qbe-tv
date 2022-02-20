@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# usage: qbe-tv file.ssa
+
+set -e
+dir=$(dirname "$1")
+name=$(basename "$1" .ssa)
+set -x
+
+bin/qbe2c "$1" >"$dir/$name.c"
+clang -S -emit-llvm -o "$dir/$name.ll" "$dir/$name.c"
