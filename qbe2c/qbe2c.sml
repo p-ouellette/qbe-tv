@@ -43,14 +43,17 @@ struct
 
   val fixsign = String.map (fn #"~" => #"-" | c => c)
 
-  fun sayw32 out = (say out) o (Word32.fmt StringCvt.DEC)
-  fun sayw64 out = (say out) o (Word64.fmt StringCvt.DEC)
-
+  fun sayi32 out = (say out) o fixsign o Int32.toString
   fun sayi64 out = (say out) o fixsign o Int64.toString
   fun sayr32 out = (say out) o fixsign o Real32.toString
   fun sayr64 out = (say out) o fixsign o Real64.toString
 
-  val i64tow32 = Word32.fromLargeInt o Int64.toLarge
+  fun sayw32 out = (say out) o (Word32.fmt StringCvt.DEC)
+  fun sayw64 out = (say out) o (Word64.fmt StringCvt.DEC)
+
+  val i64toi32 = Int32.fromLarge o Word32.toLargeIntX
+               o Word32.fromLargeInt o Int64.toLarge
+
   val i64tolw = LargeWord.fromLargeInt o Int64.toLarge
 
   fun i64tor32 i = let
@@ -75,7 +78,7 @@ struct
   val r64tor32 = PR32.fromBytes o PR64.toBytes
 
   fun saycon out =
-    fn T.W => (fn T.Int i => sayw32 out (i64tow32 i)
+    fn T.W => (fn T.Int i => sayi32 out (i64toi32 i)
                 | T.Flts r => sayw32 out (r32tow32 r)
                 | T.Fltd r => sayw32 out (r64tow32 r))
      | T.L => (fn T.Int i => sayi64 out i
