@@ -46,43 +46,46 @@ struct
   fun sayw32 out = (say out) o (Word32.fmt StringCvt.DEC)
   fun sayw64 out = (say out) o (Word64.fmt StringCvt.DEC)
 
+  fun sayi64 out = (say out) o fixsign o Int64.toString
   fun sayr32 out = (say out) o fixsign o Real32.toString
   fun sayr64 out = (say out) o fixsign o Real64.toString
 
-  val itow32 = Word32.fromLargeInt o Int64.toLarge
-  val itolw = LargeWord.fromLargeInt o Int64.toLarge
+  val i64tow32 = Word32.fromLargeInt o Int64.toLarge
+  val i64tolw = LargeWord.fromLargeInt o Int64.toLarge
 
-  fun itor32 i = let
+  fun i64tor32 i = let
         val b = Word8Array.array(4, 0w0)
-         in PW32.update(b, 0, itolw i);
+         in PW32.update(b, 0, i64tolw i);
             PR32.fromBytes(Word8Array.vector b)
         end
 
-  fun itor64 i = let
+  fun i64tor64 i = let
         val b = Word8Array.array(8, 0w0)
-         in PW64.update(b, 0, itolw i);
+         in PW64.update(b, 0, i64tolw i);
             PR64.fromBytes(Word8Array.vector b)
         end
 
-  fun rtolw r = PW64.subVec(PR64.toBytes r, 0)
+  fun r32tolw r = PW32.subVec(PR32.toBytes r, 0)
+  fun r64tolw r = PW64.subVec(PR64.toBytes r, 0)
 
-  val rtow32 = Word32.fromLarge o rtolw
-  val rtow64 = Word64.fromLarge o rtolw
+  val r32tow32 = Word32.fromLarge o r32tolw
+  val r64tow32 = Word32.fromLarge o r64tolw
+  val r64tow64 = Word64.fromLarge o r64tolw
 
-  val rtor32 = PR32.fromBytes o PR64.toBytes
+  val r64tor32 = PR32.fromBytes o PR64.toBytes
 
   fun saycon out =
-    fn T.W => (fn T.Int i => sayw32 out (itow32 i)
-                | T.Flts r => sayw32 out (rtow32 r)
-                | T.Fltd r => sayw32 out (rtow32 r))
-     | T.L => (fn T.Int i => say out (fixsign(Int64.toString i))
-                | T.Flts r => sayw64 out (rtow64 r)
-                | T.Fltd r => sayw64 out (rtow64 r))
-     | T.S => (fn T.Int i => sayr32 out (itor32 i)
-                | T.Flts r => sayr32 out (rtor32 r)
-                | T.Fltd r => sayr32 out (rtor32 r))
-     | T.D => (fn T.Int i => sayr64 out (itor64 i)
-                | T.Flts r => sayr64 out r
+    fn T.W => (fn T.Int i => sayw32 out (i64tow32 i)
+                | T.Flts r => sayw32 out (r32tow32 r)
+                | T.Fltd r => sayw32 out (r64tow32 r))
+     | T.L => (fn T.Int i => sayi64 out i
+                | T.Flts r => sayw32 out (r32tow32 r)
+                | T.Fltd r => sayw64 out (r64tow64 r))
+     | T.S => (fn T.Int i => sayr32 out (i64tor32 i)
+                | T.Flts r => sayr32 out r
+                | T.Fltd r => sayr32 out (r64tor32 r))
+     | T.D => (fn T.Int i => sayr64 out (i64tor64 i)
+                | T.Flts r => sayr32 out r
                 | T.Fltd r => sayr64 out r)
      | _ => fn _ => impossible "bad type"
 
