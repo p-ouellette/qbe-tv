@@ -5,3 +5,4 @@ $/smlnj-lib.cm
 ../qbe-sml/qbe.cm
 
 qbe2c.sml
+smlnj-real32.sml

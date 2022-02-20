@@ -1,17 +1,26 @@
 structure Qbe2C =
 struct
 
+  structure AM = AtomMap
   structure T = QbeTypes
+  structure PR32 = PackReal32Little
+  structure PR64 = PackReal64Little
+  structure PW32 = PackWord32Little
+  structure PW64 = PackWord64Little
   structure TIO = TextIO
 
-  exception InvalidAst
+  exception Impossible
+
+  fun impossible msg =
+        (app (fn s => TIO.output(TIO.stdErr, s)) ["error: ", msg, "\n"];
+         raise Impossible)
 
   fun canon ({name, linkage, params, envp, variadic, result=NONE, blocks}) = let
         fun findret ([]: T.block list) = NONE
           | findret ({jump=SOME(T.Retw _), ...} :: _) = SOME T.W
           | findret (_::bs) = findret bs
-        fun fixret {label, stmts, jump=SOME(T.Retw v)} =
-              {label=label, stmts=stmts, jump=SOME(T.Ret v)}
+        fun fixret {label, phis, stmts, jump=SOME(T.Retw v)} =
+              {label=label, phis=phis, stmts=stmts, jump=SOME(T.Ret v)}
           | fixret b = b
         val result = findret blocks
         val blocks = map fixret blocks
@@ -22,32 +31,75 @@ struct
     | canon f = f
 
   fun say out s = TIO.output(out, s)
+
   fun sayid out id = say out (Atom.toString id)
 
-  fun basety T.W = "int"
-    | basety T.L = "long"
-    | basety T.S = "float"
-    | basety T.D = "double"
-    | basety _ = raise InvalidAst
-
-  fun saybasety out = (say out) o basety
+  fun sayty out = (say out) o
+        (fn T.W => "int"
+          | T.L => "long"
+          | T.S => "float"
+          | T.D => "double"
+          | _ => impossible "bad type")
 
   val fixsign = String.map (fn #"~" => #"-" | c => c)
 
-  fun saycon out (T.Int i) = say out (fixsign(Int64.toString i))
-    | saycon out (T.Flts f) = say out (fixsign(Real.toString f))
-    | saycon out (T.Fltd f) = say out (fixsign(Real.toString f))
+  fun sayw32 out = (say out) o (Word32.fmt StringCvt.DEC)
+  fun sayw64 out = (say out) o (Word64.fmt StringCvt.DEC)
 
-  fun sayval out (T.Tmp name) = sayid out name
-    | sayval out (T.Glo name) = sayid out name
-    | sayval out (T.Con c) = saycon out c
+  fun sayr32 out = (say out) o fixsign o Real32.toString
+  fun sayr64 out = (say out) o fixsign o Real64.toString
 
-  fun sayinstr out = let
+  val itow32 = Word32.fromLargeInt o Int64.toLarge
+  val itolw = LargeWord.fromLargeInt o Int64.toLarge
+
+  fun itor32 i = let
+        val b = Word8Array.array(4, 0w0)
+         in PW32.update(b, 0, itolw i);
+            PR32.fromBytes(Word8Array.vector b)
+        end
+
+  fun itor64 i = let
+        val b = Word8Array.array(8, 0w0)
+         in PW64.update(b, 0, itolw i);
+            PR64.fromBytes(Word8Array.vector b)
+        end
+
+  fun rtolw r = PW64.subVec(PR64.toBytes r, 0)
+
+  val rtow32 = Word32.fromLarge o rtolw
+  val rtow64 = Word64.fromLarge o rtolw
+
+  val rtor32 = PR32.fromBytes o PR64.toBytes
+
+  fun saycon out =
+    fn T.W => (fn T.Int i => sayw32 out (itow32 i)
+                | T.Flts r => sayw32 out (rtow32 r)
+                | T.Fltd r => sayw32 out (rtow32 r))
+     | T.L => (fn T.Int i => say out (fixsign(Int64.toString i))
+                | T.Flts r => sayw64 out (rtow64 r)
+                | T.Fltd r => sayw64 out (rtow64 r))
+     | T.S => (fn T.Int i => sayr32 out (itor32 i)
+                | T.Flts r => sayr32 out (rtor32 r)
+                | T.Fltd r => sayr32 out (rtor32 r))
+     | T.D => (fn T.Int i => sayr64 out (itor64 i)
+                | T.Flts r => sayr64 out r
+                | T.Fltd r => sayr64 out r)
+     | _ => fn _ => impossible "bad type"
+
+  fun sayval out venv ty (T.Tmp name) =
+        (case (AM.lookup(venv, name), ty)
+           of (T.L, T.W) => (say out "(int)"; sayid out name)
+            | ts => if T.sameTy ts then sayid out name
+                    else impossible "type mismatch")
+    | sayval out venv ty (T.Glo name) = sayid out name
+    | sayval out venv ty (T.Con c) = saycon out ty c
+
+  fun trinstr out venv ty = let
     val say = say out
-    val sayval = sayval out
+    val sayval = sayval out venv ty
     in
-      fn T.Add(a, b) => (sayval a; say " + "; sayval b)
-       | T.Sub(a, b) => (sayval a; say " - "; sayval b)
+      fn T.Add(a, b) => (say "("; sayval a; say " + "; sayval b; say ")")
+       | T.Sub(a, b) => (say "("; sayval a; say " - "; sayval b; say ")")
        | T.Div(a, b) => say "div"
        | T.Mul(a, b) => say "mul"
        | T.Neg a => say "neg"
@@ -60,12 +112,6 @@ struct
        | T.Sar(a, b) => say "sar"
        | T.Shr(a, b) => say "shr"
        | T.Shl(a, b) => say "shl"
-       | T.Stored(a, b) => say "stored"
-       | T.Stores(a, b) => say "stores"
-       | T.Storel(a, b) => say "storel"
-       | T.Storew(a, b) => say "storew"
-       | T.Storeh(a, b) => say "storeh"
-       | T.Storeb(a, b) => say "storeb"
        | T.Loadd a => say "loadd"
        | T.Loads a => say "loads"
        | T.Loadl a => say "loadl"
@@ -133,46 +179,73 @@ struct
        | T.Truncd a => say "truncd"
        | T.Cast a => say "cast"
        | T.Copy a => say "copy"
-       | T.Call {name, args, ...} => say "call"
-       | T.Vastart a => say "vastart"
        | T.Vaarg a => say "vaarg"
-       | T.Phi args => say "phi"
-       | _ => raise Fail "impossible"
     end
+
+  fun trassign out venv (name, ty, ins) = let
+        val say = say out
+        val _ = say "\t"
+        val (venv, ty') =
+          case AM.find(venv, name)
+            of NONE => ((sayty out ty; say " "; AM.insert(venv, name, ty)), ty)
+             | SOME ty' => (venv, ty')
+        in
+          case (ty', ty)
+            of (T.W, T.L) => (sayid out name; say " = (int)")
+             | (T.L, T.W) => (say "*(int *)&"; sayid out name; say " = ")
+             | ts => if T.sameTy ts then (sayid out name; say " = ")
+                     else impossible "type mismatch";
+          trinstr out venv ty ins; say ";\n";
+          venv
+        end
+
+  fun trstmt out =
+        fn (T.Assign a, venv) => trassign out venv a
+         | (T.Stored a, venv) => (say out "\tstore\n"; venv)
+         | (T.Stores a, venv) => (say out "\tstore\n"; venv)
+         | (T.Storel a, venv) => (say out "\tstore\n"; venv)
+         | (T.Storew a, venv) => (say out "\tstore\n"; venv)
+         | (T.Storeh a, venv) => (say out "\tstore\n"; venv)
+         | (T.Storeb a, venv) => (say out "\tstore\n"; venv)
+         | (T.Call c, venv) => (say out "\tcall\n"; venv)
+         | (T.Vastart v, venv) => (say out "\tvastart\n"; venv)
+         | (T.Nop, venv) => venv
+
+  fun trjmp out venv rty = let
+        val say = say out
+        val sayval = sayval out venv
+        fun saygoto lbl = (say "goto "; sayid out lbl; say ";\n")
+        in
+          fn T.Jmp lbl => (say "\t"; saygoto lbl)
+           | T.Jnz(v, l1, l2) => (say "\tif ("; sayval T.W v; say " != 0) ";
+                                  saygoto l1; say "\t"; saygoto l2)
+           | T.Ret NONE => say "\treturn;\n"
+           | T.Ret(SOME v) => (say "\treturn "; sayval (valOf rty) v; say ";\n")
+           | _ => impossible "unexpected ret"
+        end
 
   fun trdef out (T.Data _) = ()
     | trdef out (T.Function func) = let
-        val say = say out
-        fun sayparam (ty, name) =
-              (saybasety out ty; say " "; sayid out name; say ", ")
-        fun saystmt (T.Assign(name, ty, ins)) =
-              (say "\t"; saybasety out ty; say " "; sayid out name; say " = ";
-               sayinstr out ins; say ";\n")
-          | saystmt (T.Volatile T.Nop) = ()
-          | saystmt (T.Volatile ins) = (say "\t"; sayinstr out ins; say ";\n")
-        fun saygoto l = (say "goto "; sayid out l; say ";\n")
-        fun sayblk {label, stmts, jump} =
-              (sayid out label; say ":;\n"; app saystmt stmts;
-               case jump
-                 of NONE => ()
-                  | SOME(T.Jmp l) => (say "\t"; saygoto l)
-                  | SOME(T.Jnz(v, l1, l2)) =>
-                      (say "\tif ("; sayval out v; say " != 0) "; saygoto l1;
-                       say "\t"; saygoto l2)
-                  | SOME(T.Ret NONE) => say "\treturn;\n"
-                  | SOME(T.Ret(SOME v)) =>
-                      (say "\treturn "; sayval out v; say ";\n")
-                  | _ => raise InvalidAst)
         val {name, params, result, blocks, ...} = canon func
+        fun enterParam ((ty, name), venv) = AM.insert(venv, name, ty)
+        val venv = foldl enterParam AM.empty params
+        val say = say out
+        fun sayparams [] = say "void"
+          | sayparams [(ty, name)] = (sayty out ty; say " "; sayid out name)
+          | sayparams ((ty, name)::ps) =
+              (sayty out ty; say " "; sayid out name; say ", "; sayparams ps)
+        fun trblk ({label, phis=_, stmts, jump}, venv) = let
+              val _ = (sayid out label; say ":;\n")
+              val venv = foldl (trstmt out) venv stmts
+               in Option.app (trjmp out venv result) jump;
+                  venv
+              end
         in
           case result
             of NONE => say "void"
-             | SOME ty => saybasety out ty;
-          say " "; sayid out name; say "(";
-          case params
-            of [] => say "void"
-             | _ => app sayparam params;
-          say ") {\n"; app sayblk blocks; say "}\n"
+             | SOME ty => sayty out ty;
+          say " "; sayid out name; say "("; sayparams params; say ") {\n";
+          foldl trblk venv blocks; say "}\n"
         end
     | trdef _ _ = ()
 
