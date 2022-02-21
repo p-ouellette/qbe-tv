@@ -1,7 +1,4 @@
-qbe2c: qbe2c.mlb qbe2c.sml mlton-main.sml
-	mlton qbe2c.mlb
+BIN = ../bin
 
-clean:
-	rm -rf qbe2c
-
-.PHONY: clean
+$(BIN)/qbe2c: qbe2c.mlb qbe2c.sml mlton-main.sml
+	mlton -output $@  qbe2c.mlb

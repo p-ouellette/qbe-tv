@@ -255,13 +255,19 @@ struct
         end
     | trdef _ _ = ()
 
-  fun main (_, [fileName]) = let
-        val defs = QbeParse.parse fileName
+  fun qbe2c (ins, name) = let
+        val defs = QbeParse.parse(ins, name)
         in
           if QbeParse.anyErrors() then OS.Process.failure
           else (app (trdef TIO.stdOut) defs; OS.Process.success)
         end
-    | main _ = (TIO.output(TIO.stdErr, "usage: qbe2c file\n");
+
+  fun main (_, []) = qbe2c(TIO.stdIn, "stdin")
+    | main (_, [fileName]) = let
+        val strm = TIO.openIn fileName
+         in qbe2c(strm, fileName) before TIO.closeIn strm
+        end
+    | main _ = (TIO.output(TIO.stdErr, "usage: qbe2c [file.ssa]\n");
                 OS.Process.failure)
 
 end
