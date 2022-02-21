@@ -1,0 +1,12 @@
+diff --git a/main.c b/main.c
+index 83f08ba..f30004b 100644
+--- a/main.c
++++ b/main.c
+@@ -76,6 +76,7 @@ func(Fn *fn)
+ 	copy(fn);
+ 	filluse(fn);
+ 	fold(fn);
++	printfn(fn, stderr);
+ 	T.abi(fn);
+ 	fillpreds(fn);
+ 	filluse(fn);
