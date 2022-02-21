@@ -39,7 +39,7 @@ struct
           | T.L => "long"
           | T.S => "float"
           | T.D => "double"
-          | _ => impossible "bad type")
+          | _ => impossible "base type expected")
 
   val fixsign = String.map (fn #"~" => #"-" | c => c)
 
@@ -90,7 +90,7 @@ struct
      | T.D => (fn T.Int i => sayr64 out (i64tor64 i)
                 | T.Flts r => sayr32 out r
                 | T.Fltd r => sayr64 out r)
-     | _ => fn _ => impossible "bad type"
+     | _ => fn _ => impossible "base type expected"
 
   fun sayval out venv ty (T.Tmp name) =
         (case (AM.lookup(venv, name), ty)
@@ -102,22 +102,31 @@ struct
 
   fun trinstr out venv ty = let
     val say = say out
-    val sayval = sayval out venv ty
+    val sayv = sayval out venv ty
+    val sayvt = sayval out venv
+    fun ucast v = case ty
+          of T.W => (say "(unsigned)"; sayvt T.W v)
+           | T.L => (say "(unsigned long)"; sayvt T.L v)
+           | _ => impossible "integer expected"
+    fun sayvi v = case ty
+          of T.W => sayv v
+           | T.L => sayv v
+           | _ => impossible "integer expected"
     in
-      fn T.Add(a, b) => (say "("; sayval a; say " + "; sayval b; say ")")
-       | T.Sub(a, b) => (say "("; sayval a; say " - "; sayval b; say ")")
-       | T.Div(a, b) => say "div"
-       | T.Mul(a, b) => say "mul"
-       | T.Neg a => say "neg"
-       | T.Udiv(a, b) => say "udiv"
-       | T.Rem(a, b) => say "rem"
-       | T.Urem(a, b) => say "urem"
-       | T.Or(a, b) => say "or"
-       | T.Xor(a, b) => say "xor"
-       | T.And(a, b) => say "and"
-       | T.Sar(a, b) => say "sar"
-       | T.Shr(a, b) => say "shr"
-       | T.Shl(a, b) => say "shl"
+      fn T.Add(a, b) => (say "("; sayv a; say " + "; sayv b; say ")")
+       | T.Sub(a, b) => (say "("; sayv a; say " - "; sayv b; say ")")
+       | T.Div(a, b) => (say "("; sayv a; say " / "; sayv b; say ")")
+       | T.Mul(a, b) => (say "("; sayv a; say " * "; sayv b; say ")")
+       | T.Neg a => (say "-"; sayv a)
+       | T.Udiv(a, b) => (say "("; ucast a; say " / "; ucast b; say ")")
+       | T.Rem(a, b) => (say "("; sayvi a; say " % "; sayvi b; say ")")
+       | T.Urem(a, b) => (say "("; ucast a; say " % "; ucast b; say ")")
+       | T.Or(a, b) => (say "("; sayvi a; say " | "; sayvi b; say ")")
+       | T.Xor(a, b) => (say "("; sayvi a; say " ^ "; sayvi b; say ")")
+       | T.And(a, b) => (say "("; sayvi a; say " & "; sayvi b; say ")")
+       | T.Sar(a, b) => (say "("; sayvi a; say " >> "; sayvt T.W b; say ")")
+       | T.Shr(a, b) => (say "("; ucast a; say " >> "; sayvt T.W b; say ")")
+       | T.Shl(a, b) => (say "("; sayvi a; say " << "; sayvt T.W b; say ")")
        | T.Loadd a => say "loadd"
        | T.Loads a => say "loads"
        | T.Loadl a => say "loadl"
