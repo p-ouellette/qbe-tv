@@ -11,6 +11,8 @@ struct
 
   exception Impossible
 
+  datatype ctype = I32 | U32 | I64 | U64 | FLT | DBL
+
   fun impossible msg =
         (app (fn s => TIO.output(TIO.stdErr, s)) ["error: ", msg, "\n"];
          raise Impossible)
@@ -34,99 +36,101 @@ struct
 
   fun sayid out id = say out (Atom.toString id)
 
+  fun ctype T.W = U32
+    | ctype T.L = U64
+    | ctype T.S = FLT
+    | ctype T.D = DBL
+    | ctype _ = impossible "base type expected"
+
   fun sayty out = (say out) o
-        (fn T.W => "int"
-          | T.L => "long"
-          | T.S => "float"
-          | T.D => "double"
-          | _ => impossible "base type expected")
+        (fn I32 => "int32_t"
+          | U32 => "uint32_t"
+          | I64 => "int64_t"
+          | U64 => "uint64_t"
+          | FLT => "float"
+          | DBL => "double")
 
-  val fixsign = String.map (fn #"~" => #"-" | c => c)
+  local
+    val fixsign = String.map (fn #"~" => #"-" | c => c)
 
-  fun sayi32 out = (say out) o fixsign o Int32.toString
-  fun sayi64 out = (say out) o fixsign o Int64.toString
-  fun sayr32 out = (say out) o fixsign o Real32.toString
-  fun sayr64 out = (say out) o fixsign o Real64.toString
+    val i64tolw = LargeWord.fromLargeInt o Int64.toLarge
 
-  fun sayw32 out = (say out) o (Word32.fmt StringCvt.DEC)
-  fun sayw64 out = (say out) o (Word64.fmt StringCvt.DEC)
+    fun i64tor32 i = let
+          val b = Word8Array.array(4, 0w0)
+           in PW32.update(b, 0, i64tolw i);
+              PR32.fromBytes(Word8Array.vector b)
+          end
 
-  val i64toi32 = Int32.fromLarge o Word32.toLargeIntX
-               o Word32.fromLargeInt o Int64.toLarge
+    fun i64tor64 i = let
+          val b = Word8Array.array(8, 0w0)
+           in PW64.update(b, 0, i64tolw i);
+              PR64.fromBytes(Word8Array.vector b)
+          end
 
-  val i64tolw = LargeWord.fromLargeInt o Int64.toLarge
+    fun r32tolw r = PW32.subVec(PR32.toBytes r, 0)
+    fun r64tolw r = PW64.subVec(PR64.toBytes r, 0)
 
-  fun i64tor32 i = let
-        val b = Word8Array.array(4, 0w0)
-         in PW32.update(b, 0, i64tolw i);
-            PR32.fromBytes(Word8Array.vector b)
-        end
+    val r64tor32 = PR32.fromBytes o PR64.toBytes
+  in
+    fun saycon out ty c = let
+          val say = say out
+          val sayi64 = say o fixsign o Int64.toString
+          val sayr32 = say o fixsign o Real32.toString
+          val sayr64 = say o fixsign o Real64.toString
+          val saylw = say o (LargeWord.fmt StringCvt.DEC)
 
-  fun i64tor64 i = let
-        val b = Word8Array.array(8, 0w0)
-         in PW64.update(b, 0, i64tolw i);
-            PR64.fromBytes(Word8Array.vector b)
-        end
-
-  fun r32tolw r = PW32.subVec(PR32.toBytes r, 0)
-  fun r64tolw r = PW64.subVec(PR64.toBytes r, 0)
-
-  val r32tow32 = Word32.fromLarge o r32tolw
-  val r64tow32 = Word32.fromLarge o r64tolw
-  val r64tow64 = Word64.fromLarge o r64tolw
-
-  val r64tor32 = PR32.fromBytes o PR64.toBytes
-
-  fun saycon out =
-    fn T.W => (fn T.Int i => sayi32 out (i64toi32 i)
-                | T.Flts r => sayw32 out (r32tow32 r)
-                | T.Fltd r => sayw32 out (r64tow32 r))
-     | T.L => (fn T.Int i => sayi64 out i
-                | T.Flts r => sayw32 out (r32tow32 r)
-                | T.Fltd r => sayw64 out (r64tow64 r))
-     | T.S => (fn T.Int i => sayr32 out (i64tor32 i)
-                | T.Flts r => sayr32 out r
-                | T.Fltd r => sayr32 out (r64tor32 r))
-     | T.D => (fn T.Int i => sayr64 out (i64tor64 i)
-                | T.Flts r => sayr32 out r
-                | T.Fltd r => sayr64 out r)
-     | _ => fn _ => impossible "base type expected"
+          fun sayint (T.Int i) = sayi64 i
+            | sayint (T.Flts r) = saylw (r32tolw r)
+            | sayint (T.Fltd r) = saylw (r64tolw r)
+          fun sayflt (T.Int i) = sayr32 (i64tor32 i)
+            | sayflt (T.Flts r) = sayr32 r
+            | sayflt (T.Fltd r) = sayr32 (r64tor32 r)
+          fun saydbl (T.Int i) = sayr64 (i64tor64 i)
+            | saydbl (T.Flts r) = sayr32 r
+            | saydbl (T.Fltd r) = sayr64 r
+          in
+            case ty
+              of I32 => (say "(int32_t)"; sayint c)
+               | U32 => (say "(uint32_t)"; sayint c)
+               | I64 => (say "(int64_t)"; sayint c)
+               | U64 => (say "(uint64_t)"; sayint c)
+               | FLT => (sayflt c; say "f")
+               | DBL => saydbl c
+          end
+  end
 
   fun sayval out venv ty (T.Tmp name) =
-        (case (AM.lookup(venv, name), ty)
-           of (T.L, T.W) => (say out "(int)"; sayid out name)
-            | ts => if T.sameTy ts then sayid out name
-                    else impossible "type mismatch")
+        (case (ty, AM.lookup(venv, name))
+           of (U32, U64) => (say out "(uint32_t)"; sayid out name)
+            | (ty, ty') => if ty = ty' then sayid out name
+                           else impossible "type mismatch")
     | sayval out venv ty (T.Glo name) = sayid out name
     | sayval out venv ty (T.Con c) = saycon out ty c
 
-  fun trinstr out venv ty = let
+  fun trinstr out venv cls = let
+    val ty = ctype cls
     val say = say out
-    val sayv = sayval out venv ty
-    val sayvt = sayval out venv
-    fun ucast v = case ty
-          of T.W => (say "(unsigned)"; sayvt T.W v)
-           | T.L => (say "(unsigned long)"; sayvt T.L v)
-           | _ => impossible "integer expected"
-    fun sayvi v = case ty
-          of T.W => sayv v
-           | T.L => sayv v
-           | _ => impossible "integer expected"
+    val sayval = sayval out venv
+    fun sayv v = sayval ty v
+    fun sayvs v = sayval (case ty of U32 => I32 | U64 => I64 | ty => ty) v
     in
-      fn T.Add(a, b) => (say "("; sayv a; say " + "; sayv b; say ")")
-       | T.Sub(a, b) => (say "("; sayv a; say " - "; sayv b; say ")")
-       | T.Div(a, b) => (say "("; sayv a; say " / "; sayv b; say ")")
-       | T.Mul(a, b) => (say "("; sayv a; say " * "; sayv b; say ")")
+      fn T.Add(a, b) => (sayv a; say " + "; sayv b)
+       | T.Sub(a, b) => (sayv a; say " - "; sayv b)
+       | T.Div(a, b) => (sayvs a; say " / "; sayvs b)
+       | T.Mul(a, b) => (sayv a; say " * "; sayv b)
        | T.Neg a => (say "-"; sayv a)
-       | T.Udiv(a, b) => (say "("; ucast a; say " / "; ucast b; say ")")
-       | T.Rem(a, b) => (say "("; sayvi a; say " % "; sayvi b; say ")")
-       | T.Urem(a, b) => (say "("; ucast a; say " % "; ucast b; say ")")
-       | T.Or(a, b) => (say "("; sayvi a; say " | "; sayvi b; say ")")
-       | T.Xor(a, b) => (say "("; sayvi a; say " ^ "; sayvi b; say ")")
-       | T.And(a, b) => (say "("; sayvi a; say " & "; sayvi b; say ")")
-       | T.Sar(a, b) => (say "("; sayvi a; say " >> "; sayvt T.W b; say ")")
-       | T.Shr(a, b) => (say "("; ucast a; say " >> "; sayvt T.W b; say ")")
-       | T.Shl(a, b) => (say "("; sayvi a; say " << "; sayvt T.W b; say ")")
+       | T.Udiv(a, b) => (sayv a; say " / "; sayv b)
+       | T.Rem(a, b) => (sayvs a; say " % "; sayvs b)
+       | T.Urem(a, b) => (sayv a; say " % "; sayv b)
+       | T.Or(a, b) => (sayv a; say " | "; sayv b)
+       | T.Xor(a, b) => (sayv a; say " ^ "; sayv b)
+       | T.And(a, b) => (sayv a; say " & "; sayv b)
+       | T.Sar(a, b) => (sayvs a; say " >> "; say "("; sayv b;
+                         say (case cls of T.W => " & 31)" | T.L => " & 63)"))
+       | T.Shr(a, b) => (sayv a; say " >> "; say "("; sayv b;
+                         say (case cls of T.W => " & 31)" | T.L => " & 63)"))
+       | T.Shl(a, b) => (sayv a; say " << "; say "("; sayv b;
+                         say (case cls of T.W => " & 31)" | T.L => " & 63)"))
        | T.Loadd a => say "loadd"
        | T.Loads a => say "loads"
        | T.Loadl a => say "loadl"
@@ -140,42 +144,46 @@ struct
        | T.Alloc4 a => say "alloc4"
        | T.Alloc8 a => say "alloc8"
        | T.Alloc16 a => say "alloc16"
-       | T.Ceqd(a, b) => say "ceqd"
-       | T.Ceql(a, b) => say "ceql"
-       | T.Ceqs(a, b) => say "ceqs"
-       | T.Ceqw(a, b) => say "ceqw"
-       | T.Cged(a, b) => say "cged"
-       | T.Cges(a, b) => say "cges"
-       | T.Cgtd(a, b) => say "cgtd"
-       | T.Cgts(a, b) => say "cgts"
-       | T.Cled(a, b) => say "cled"
-       | T.Cles(a, b) => say "cles"
-       | T.Cltd(a, b) => say "cltd"
-       | T.Clts(a, b) => say "clts"
-       | T.Cned(a, b) => say "cned"
-       | T.Cnel(a, b) => say "cnel"
-       | T.Cnes(a, b) => say "cnes"
-       | T.Cnew(a, b) => say "cnew"
-       | T.Cod(a, b) => say "cod"
-       | T.Cos(a, b) => say "cos"
-       | T.Csgel(a, b) => say "csgel"
-       | T.Csgew(a, b) => say "csgew"
-       | T.Csgtl(a, b) => say "csgtl"
-       | T.Csgtw(a, b) => say "csgtw"
-       | T.Cslel(a, b) => say "cslel"
-       | T.Cslew(a, b) => say "cslew"
-       | T.Csltl(a, b) => say "csltl"
-       | T.Csltw(a, b) => say "csltw"
-       | T.Cugel(a, b) => say "cugel"
-       | T.Cugew(a, b) => say "cugew"
-       | T.Cugtl(a, b) => say "cugtl"
-       | T.Cugtw(a, b) => say "cugtw"
-       | T.Culel(a, b) => say "culel"
-       | T.Culew(a, b) => say "culew"
-       | T.Cultl(a, b) => say "cultl"
-       | T.Cultw(a, b) => say "cultw"
-       | T.Cuod(a, b) => say "cuod"
-       | T.Cuos(a, b) => say "cuos"
+       | T.Ceqd(a, b) => (sayv a; say " == "; sayv b)
+       | T.Ceql(a, b) => (sayv a; say " == "; sayv b)
+       | T.Ceqs(a, b) => (sayv a; say " == "; sayv b)
+       | T.Ceqw(a, b) => (sayv a; say " == "; sayv b)
+       | T.Cged(a, b) => (sayv a; say " >= "; sayv b)
+       | T.Cges(a, b) => (sayv a; say " >= "; sayv b)
+       | T.Cgtd(a, b) => (sayv a; say " > "; sayv b)
+       | T.Cgts(a, b) => (sayv a; say " > "; sayv b)
+       | T.Cled(a, b) => (sayv a; say " <= "; sayv b)
+       | T.Cles(a, b) => (sayv a; say " <= "; sayv b)
+       | T.Cltd(a, b) => (sayv a; say " < "; sayv b)
+       | T.Clts(a, b) => (sayv a; say " < "; sayv b)
+       | T.Cned(a, b) => (sayv a; say " != "; sayv b)
+       | T.Cnel(a, b) => (sayv a; say " != "; sayv b)
+       | T.Cnes(a, b) => (sayv a; say " != "; sayv b)
+       | T.Cnew(a, b) => (sayv a; say " != "; sayv b)
+       | T.Cod(a, b) => (sayv a; say " < "; sayv b; say " || ";
+                         sayv a; say " >= "; sayv b)
+       | T.Cos(a, b) => (sayv a; say " < "; sayv b; say " || ";
+                         sayv a; say " >= "; sayv b)
+       | T.Csgel(a, b) => (sayvs a; say " >= "; sayvs b)
+       | T.Csgew(a, b) => (sayvs a; say " >= "; sayvs b)
+       | T.Csgtl(a, b) => (sayvs a; say " > "; sayvs b)
+       | T.Csgtw(a, b) => (sayvs a; say " > "; sayvs b)
+       | T.Cslel(a, b) => (sayvs a; say " <= "; sayvs b)
+       | T.Cslew(a, b) => (sayvs a; say " <= "; sayvs b)
+       | T.Csltl(a, b) => (sayvs a; say " < "; sayvs b)
+       | T.Csltw(a, b) => (sayvs a; say " < "; sayvs b)
+       | T.Cugel(a, b) => (sayv a; say " >= "; sayv b)
+       | T.Cugew(a, b) => (sayv a; say " >= "; sayv b)
+       | T.Cugtl(a, b) => (sayv a; say " > "; sayv b)
+       | T.Cugtw(a, b) => (sayv a; say " > "; sayv b)
+       | T.Culel(a, b) => (sayv a; say " <= "; sayv b)
+       | T.Culew(a, b) => (sayv a; say " <= "; sayv b)
+       | T.Cultl(a, b) => (sayv a; say " < "; sayv b)
+       | T.Cultw(a, b) => (sayv a; say " < "; sayv b)
+       | T.Cuod(a, b) => (sayv a; say " != "; sayv a; say " || ";
+                          sayv b; say " != "; sayv b)
+       | T.Cuos(a, b) => (sayv a; say " != "; sayv a; say " || ";
+                          sayv b; say " != "; sayv b)
        | T.Dtosi a => say "dtosi"
        | T.Dtoui a => say "dtoui"
        | T.Exts a => say "exts"
@@ -199,17 +207,18 @@ struct
 
   fun trassign out venv (name, ty, ins) = let
         val say = say out
+        val ct = ctype ty
         val _ = say "\t"
-        val (venv, ty') =
+        val (venv, ct') =
           case AM.find(venv, name)
-            of NONE => ((sayty out ty; say " "; AM.insert(venv, name, ty)), ty)
-             | SOME ty' => (venv, ty')
+            of NONE => ((sayty out ct; say " "; AM.insert(venv, name, ct)), ct)
+             | SOME ct' => (venv, ct')
         in
-          case (ty', ty)
-            of (T.W, T.L) => (sayid out name; say " = (int)")
-             | (T.L, T.W) => (say "*(int *)&"; sayid out name; say " = ")
-             | ts => if T.sameTy ts then (sayid out name; say " = ")
-                     else impossible "type mismatch";
+          case (ct', ct)
+            of (U32, U64) => (sayid out name; say " = ")
+             | (U64, U32) => (say "*(uint32_t *)&"; sayid out name; say " = ")
+             | _ => if ct' = ct then (sayid out name; say " = ")
+                    else impossible "type mismatch";
           trinstr out venv ty ins; say ";\n";
           venv
         end
@@ -232,23 +241,25 @@ struct
         fun saygoto lbl = (say "goto "; sayid out lbl; say ";\n")
         in
           fn T.Jmp lbl => (say "\t"; saygoto lbl)
-           | T.Jnz(v, l1, l2) => (say "\tif ("; sayval T.W v; say " != 0) ";
+           | T.Jnz(v, l1, l2) => (say "\tif ("; sayval U32 v; say " != 0) ";
                                   saygoto l1; say "\t"; saygoto l2)
            | T.Ret NONE => say "\treturn;\n"
-           | T.Ret(SOME v) => (say "\treturn "; sayval (valOf rty) v; say ";\n")
+           | T.Ret(SOME v) => (say "\treturn "; sayval (ctype(valOf rty)) v;
+                               say ";\n")
            | _ => impossible "unexpected ret"
         end
 
   fun trdef out (T.Data _) = ()
     | trdef out (T.Function func) = let
         val {name, params, result, blocks, ...} = canon func
-        fun enterParam ((ty, name), venv) = AM.insert(venv, name, ty)
+        fun enterParam ((ty, name), venv) = AM.insert(venv, name, ctype ty)
         val venv = foldl enterParam AM.empty params
         val say = say out
+        val sayty = sayty out
         fun sayparams [] = say "void"
-          | sayparams [(ty, name)] = (sayty out ty; say " "; sayid out name)
+          | sayparams [(ty, name)] = (sayty(ctype ty); say " "; sayid out name)
           | sayparams ((ty, name)::ps) =
-              (sayty out ty; say " "; sayid out name; say ", "; sayparams ps)
+              (sayty(ctype ty); say " "; sayid out name; say ", "; sayparams ps)
         fun trblk ({label, phis=_, stmts, jump}, venv) = let
               val _ = (sayid out label; say ":;\n")
               val venv = foldl (trstmt out) venv stmts
@@ -258,7 +269,7 @@ struct
         in
           case result
             of NONE => say "void"
-             | SOME ty => sayty out ty;
+             | SOME ty => sayty(ctype ty);
           say " "; sayid out name; say "("; sayparams params; say ") {\n";
           foldl trblk venv blocks; say "}\n"
         end
@@ -268,7 +279,10 @@ struct
         val defs = QbeParse.parse(ins, name)
         in
           if QbeParse.anyErrors() then OS.Process.failure
-          else (app (trdef TIO.stdOut) defs; OS.Process.success)
+          else
+            (say TIO.stdOut "#include <stdint.h>\n\n";
+             app (trdef TIO.stdOut) defs;
+             OS.Process.success)
         end
 
   fun main (_, []) = qbe2c(TIO.stdIn, "stdin")

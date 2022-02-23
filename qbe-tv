@@ -11,7 +11,7 @@ original one.
 
 set -e
 
-if [ $# = 0 ] || [ $# -gt 2 ]
+if [ $# != 1 ] && [ $# != 2 ]
 then
 	echo "$usage"
 	exit 1
@@ -24,7 +24,7 @@ if [ $# = 1 ]
 then
 	name2=$name1.tgt
 	ssa2=$name2.ssa
-	qbe "$1" >/dev/null 2>"$ssa2"
+	qbe -o /dev/null "$1" >"$ssa2"
 else
 	ssa2=$2
 	name2=$(basename "$2" .ssa)
