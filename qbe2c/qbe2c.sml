@@ -101,7 +101,9 @@ struct
 
   fun sayval out venv ty (T.Tmp name) =
         (case (ty, AM.lookup(venv, name))
-           of (U32, U64) => (say out "(uint32_t)"; sayid out name)
+           of (I32, U64) => (say out "(int32_t)"; sayid out name)
+            | (U32, U64) => (say out "(uint32_t)"; sayid out name)
+            | (I32, U32) => (say out "(int32_t)"; sayid out name)
             | (ty, ty') => if ty = ty' then sayid out name
                            else impossible "type mismatch")
     | sayval out venv ty (T.Glo name) = sayid out name
@@ -109,10 +111,18 @@ struct
 
   fun trinstr out venv cls = let
     val ty = ctype cls
+    val sty = case ty of U32 => I32 | U64 => I64 | ty => ty
     val say = say out
+    val sayty = sayty out
     val sayval = sayval out venv
     fun sayv v = sayval ty v
-    fun sayvs v = sayval (case ty of U32 => I32 | U64 => I64 | ty => ty) v
+    fun sayvs v = sayval sty v
+    val sayi32 = sayval I32
+    val sayu32 = sayval U32
+    val sayi64 = sayval I64
+    val sayu64 = sayval U64
+    val sayflt = sayval FLT
+    val saydbl = sayval DBL
     in
       fn T.Add(a, b) => (sayv a; say " + "; sayv b)
        | T.Sub(a, b) => (sayv a; say " - "; sayv b)
@@ -125,11 +135,11 @@ struct
        | T.Or(a, b) => (sayv a; say " | "; sayv b)
        | T.Xor(a, b) => (sayv a; say " ^ "; sayv b)
        | T.And(a, b) => (sayv a; say " & "; sayv b)
-       | T.Sar(a, b) => (sayvs a; say " >> "; say "("; sayv b;
+       | T.Sar(a, b) => (sayvs a; say " >> "; say "("; sayu32 b;
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
-       | T.Shr(a, b) => (sayv a; say " >> "; say "("; sayv b;
+       | T.Shr(a, b) => (sayv a; say " >> "; say "("; sayu32 b;
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
-       | T.Shl(a, b) => (sayv a; say " << "; say "("; sayv b;
+       | T.Shl(a, b) => (sayv a; say " << "; say "("; sayu32 b;
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
        | T.Loadd a => say "loadd"
        | T.Loads a => say "loads"
@@ -144,62 +154,62 @@ struct
        | T.Alloc4 a => say "alloc4"
        | T.Alloc8 a => say "alloc8"
        | T.Alloc16 a => say "alloc16"
-       | T.Ceqd(a, b) => (sayv a; say " == "; sayv b)
-       | T.Ceql(a, b) => (sayv a; say " == "; sayv b)
-       | T.Ceqs(a, b) => (sayv a; say " == "; sayv b)
-       | T.Ceqw(a, b) => (sayv a; say " == "; sayv b)
-       | T.Cged(a, b) => (sayv a; say " >= "; sayv b)
-       | T.Cges(a, b) => (sayv a; say " >= "; sayv b)
-       | T.Cgtd(a, b) => (sayv a; say " > "; sayv b)
-       | T.Cgts(a, b) => (sayv a; say " > "; sayv b)
-       | T.Cled(a, b) => (sayv a; say " <= "; sayv b)
-       | T.Cles(a, b) => (sayv a; say " <= "; sayv b)
-       | T.Cltd(a, b) => (sayv a; say " < "; sayv b)
-       | T.Clts(a, b) => (sayv a; say " < "; sayv b)
-       | T.Cned(a, b) => (sayv a; say " != "; sayv b)
-       | T.Cnel(a, b) => (sayv a; say " != "; sayv b)
-       | T.Cnes(a, b) => (sayv a; say " != "; sayv b)
-       | T.Cnew(a, b) => (sayv a; say " != "; sayv b)
-       | T.Cod(a, b) => (sayv a; say " < "; sayv b; say " || ";
-                         sayv a; say " >= "; sayv b)
-       | T.Cos(a, b) => (sayv a; say " < "; sayv b; say " || ";
-                         sayv a; say " >= "; sayv b)
-       | T.Csgel(a, b) => (sayvs a; say " >= "; sayvs b)
-       | T.Csgew(a, b) => (sayvs a; say " >= "; sayvs b)
-       | T.Csgtl(a, b) => (sayvs a; say " > "; sayvs b)
-       | T.Csgtw(a, b) => (sayvs a; say " > "; sayvs b)
-       | T.Cslel(a, b) => (sayvs a; say " <= "; sayvs b)
-       | T.Cslew(a, b) => (sayvs a; say " <= "; sayvs b)
-       | T.Csltl(a, b) => (sayvs a; say " < "; sayvs b)
-       | T.Csltw(a, b) => (sayvs a; say " < "; sayvs b)
-       | T.Cugel(a, b) => (sayv a; say " >= "; sayv b)
-       | T.Cugew(a, b) => (sayv a; say " >= "; sayv b)
-       | T.Cugtl(a, b) => (sayv a; say " > "; sayv b)
-       | T.Cugtw(a, b) => (sayv a; say " > "; sayv b)
-       | T.Culel(a, b) => (sayv a; say " <= "; sayv b)
-       | T.Culew(a, b) => (sayv a; say " <= "; sayv b)
-       | T.Cultl(a, b) => (sayv a; say " < "; sayv b)
-       | T.Cultw(a, b) => (sayv a; say " < "; sayv b)
-       | T.Cuod(a, b) => (sayv a; say " != "; sayv a; say " || ";
-                          sayv b; say " != "; sayv b)
-       | T.Cuos(a, b) => (sayv a; say " != "; sayv a; say " || ";
-                          sayv b; say " != "; sayv b)
-       | T.Dtosi a => say "dtosi"
-       | T.Dtoui a => say "dtoui"
-       | T.Exts a => say "exts"
-       | T.Extsb a => say "extsb"
-       | T.Extsh a => say "extsh"
-       | T.Extsw a => say "extsw"
-       | T.Extub a => say "extub"
-       | T.Extuh a => say "extuh"
-       | T.Extuw a => say "extuw"
-       | T.Sltof a => say "sltof"
-       | T.Ultof a => say "ultof"
-       | T.Stosi a => say "stosi"
-       | T.Stoui a => say "stoui"
-       | T.Swtof a => say "swtof"
-       | T.Uwtof a => say "uwtof"
-       | T.Truncd a => say "truncd"
+       | T.Ceqd(a, b) => (saydbl a; say " == "; saydbl b)
+       | T.Ceql(a, b) => (sayu64 a; say " == "; sayu64 b)
+       | T.Ceqs(a, b) => (sayflt a; say " == "; sayflt b)
+       | T.Ceqw(a, b) => (sayu32 a; say " == "; sayu32 b)
+       | T.Cged(a, b) => (saydbl a; say " >= "; saydbl b)
+       | T.Cges(a, b) => (sayflt a; say " >= "; sayflt b)
+       | T.Cgtd(a, b) => (saydbl a; say " > "; saydbl b)
+       | T.Cgts(a, b) => (sayflt a; say " > "; sayflt b)
+       | T.Cled(a, b) => (saydbl a; say " <= "; saydbl b)
+       | T.Cles(a, b) => (sayflt a; say " <= "; sayflt b)
+       | T.Cltd(a, b) => (saydbl a; say " < "; saydbl b)
+       | T.Clts(a, b) => (sayflt a; say " < "; sayflt b)
+       | T.Cned(a, b) => (saydbl a; say " != "; saydbl b)
+       | T.Cnel(a, b) => (sayu64 a; say " != "; sayu64 b)
+       | T.Cnes(a, b) => (sayflt a; say " != "; sayflt b)
+       | T.Cnew(a, b) => (sayu32 a; say " != "; sayu32 b)
+       | T.Cod(a, b) => (saydbl a; say " < "; saydbl b; say " || ";
+                         saydbl a; say " >= "; saydbl b)
+       | T.Cos(a, b) => (sayflt a; say " < "; sayflt b; say " || ";
+                         sayflt a; say " >= "; sayflt b)
+       | T.Csgel(a, b) => (sayi64 a; say " >= "; sayi64 b)
+       | T.Csgew(a, b) => (sayi32 a; say " >= "; sayi32 b)
+       | T.Csgtl(a, b) => (sayi64 a; say " > "; sayi64 b)
+       | T.Csgtw(a, b) => (sayi32 a; say " > "; sayi32 b)
+       | T.Cslel(a, b) => (sayi64 a; say " <= "; sayi64 b)
+       | T.Cslew(a, b) => (sayi32 a; say " <= "; sayi32 b)
+       | T.Csltl(a, b) => (sayi64 a; say " < "; sayi64 b)
+       | T.Csltw(a, b) => (sayi32 a; say " < "; sayi32 b)
+       | T.Cugel(a, b) => (sayu64 a; say " >= "; sayu64 b)
+       | T.Cugew(a, b) => (sayu32 a; say " >= "; sayu32 b)
+       | T.Cugtl(a, b) => (sayu64 a; say " > "; sayu64 b)
+       | T.Cugtw(a, b) => (sayu32 a; say " > "; sayu32 b)
+       | T.Culel(a, b) => (sayu64 a; say " <= "; sayu64 b)
+       | T.Culew(a, b) => (sayu32 a; say " <= "; sayu32 b)
+       | T.Cultl(a, b) => (sayu64 a; say " < "; sayu64 b)
+       | T.Cultw(a, b) => (sayu32 a; say " < "; sayu32 b)
+       | T.Cuod(a, b) => (saydbl a; say " != "; saydbl a; say " || ";
+                          saydbl b; say " != "; saydbl b)
+       | T.Cuos(a, b) => (sayflt a; say " != "; sayflt a; say " || ";
+                          sayflt b; say " != "; sayflt b)
+       | T.Dtosi a => (say "("; sayty sty; say ")"; saydbl a)
+       | T.Dtoui a => (say "("; sayty ty; say ")"; saydbl a)
+       | T.Exts a => sayflt a
+       | T.Extsb a => (say "(int8_t)"; sayu32 a)
+       | T.Extsh a => (say "(int16_t)"; sayu32 a)
+       | T.Extsw a => sayi32 a
+       | T.Extub a => (say "(uint8_t)"; sayu32 a)
+       | T.Extuh a => (say "(uint16_t)"; sayu32 a)
+       | T.Extuw a => sayu32 a
+       | T.Sltof a => (say "("; sayty ty; say ")"; sayi64 a)
+       | T.Ultof a => (say "("; sayty ty; say ")"; sayu64 a)
+       | T.Stosi a => (say "("; sayty sty; say ")"; sayflt a)
+       | T.Stoui a => (say "("; sayty ty; say ")"; sayflt a)
+       | T.Swtof a => (say "(float)"; sayi32 a)
+       | T.Uwtof a => (say "(float)"; sayu32 a)
+       | T.Truncd a => (say "(float)"; saydbl a)
        | T.Cast a => say "cast"
        | T.Copy a => say "copy"
        | T.Vaarg a => say "vaarg"
