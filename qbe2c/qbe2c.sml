@@ -112,6 +112,7 @@ struct
   fun trinstr out venv cls = let
     val ty = ctype cls
     val sty = case ty of U32 => I32 | U64 => I64 | ty => ty
+    val castty = fn U32 => FLT | U64 => DBL | FLT => U32 | DBL => U64
     val say = say out
     val sayty = sayty out
     val sayval = sayval out venv
@@ -210,8 +211,9 @@ struct
        | T.Swtof a => (say "(float)"; sayi32 a)
        | T.Uwtof a => (say "(float)"; sayu32 a)
        | T.Truncd a => (say "(float)"; saydbl a)
-       | T.Cast a => say "cast"
-       | T.Copy a => say "copy"
+       | T.Cast a => (say "(union { "; sayty (castty ty); say " a; "; sayty ty;
+                      say " b; }){ .a = "; sayval (castty ty) a; say " }.b")
+       | T.Copy a => sayv a
        | T.Vaarg a => say "vaarg"
     end
 
