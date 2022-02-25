@@ -1,5 +1,5 @@
 #!/bin/sh
-usage='usage: qbe-tv src.ssa [tgt.ssa]
+usage='usage: qbe-tv src.ssa [tgt.ssa] [alive-tv-options]
 
 If two files are provided, qbe-tv checks that functions in the
 second file refine functions in the first file with the same name.
@@ -11,7 +11,7 @@ original one.
 
 set -e
 
-if [ $# != 1 ] && [ $# != 2 ]
+if [ $# = 0 ]
 then
 	echo "$usage"
 	exit 1
@@ -19,19 +19,23 @@ fi
 
 ssa1=$1
 name1=$(basename "$1" .ssa)
+shift
 
-if [ $# = 1 ]
-then
-	name2=$name1.tgt
-	ssa2=$name2.ssa
-	qbe -o /dev/null "$1" >"$ssa2"
-else
-	ssa2=$2
-	name2=$(basename "$2" .ssa)
-fi
+case "$1" in
+	-*|"")
+		name2=$name1.tgt
+		ssa2=$name2.ssa
+		qbe -o /dev/null "$ssa1" >"$ssa2"
+		;;
+	*)
+		ssa2=$1
+		name2=$(basename "$1" .ssa)
+		shift
+		;;
+esac
 
 bin/qbe2c "$ssa1" >"$name1.c"
 bin/qbe2c "$ssa2" >"$name2.c"
 clang -S -emit-llvm -o "$name1.ll" "$name1.c"
 clang -S -emit-llvm -o "$name2.ll" "$name2.c"
-alive-tv "$name1.ll" "$name2.ll"
+alive-tv "$@" "$name1.ll" "$name2.ll"
