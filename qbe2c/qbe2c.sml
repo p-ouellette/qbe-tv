@@ -17,21 +17,6 @@ struct
         (app (fn s => TIO.output(TIO.stdErr, s)) ["error: ", msg, "\n"];
          raise Impossible)
 
-  fun canon ({name, linkage, params, envp, variadic, result=NONE, blocks}) = let
-        fun findret ([]: T.block list) = NONE
-          | findret ({jump=SOME(T.Retw _), ...} :: _) = SOME T.W
-          | findret (_::bs) = findret bs
-        fun fixret {label, phis, stmts, jump=SOME(T.Retw v)} =
-              {label=label, phis=phis, stmts=stmts, jump=SOME(T.Ret v)}
-          | fixret b = b
-        val result = findret blocks
-        val blocks = map fixret blocks
-        in
-          {name=name, linkage=linkage, params=params, envp=envp,
-           variadic=variadic, result=result, blocks=blocks}
-        end
-    | canon f = f
-
   fun say out s = TIO.output(out, s)
 
   fun sayid out id = say out (Atom.toString id)
@@ -245,7 +230,6 @@ struct
          | (T.Storeb a, venv) => (say out "\tstore\n"; venv)
          | (T.Call c, venv) => (say out "\tcall\n"; venv)
          | (T.Vastart v, venv) => (say out "\tvastart\n"; venv)
-         | (T.Nop, venv) => venv
 
   fun trjmp out venv rty = let
         val say = say out
@@ -258,12 +242,10 @@ struct
            | T.Ret NONE => say "\treturn;\n"
            | T.Ret(SOME v) => (say "\treturn "; sayval (ctype(valOf rty)) v;
                                say ";\n")
-           | _ => impossible "unexpected ret"
         end
 
   fun trdef out (T.Data _) = ()
-    | trdef out (T.Function func) = let
-        val {name, params, result, blocks, ...} = canon func
+    | trdef out (T.Function {name, params, result, blocks, ...}) = let
         fun enterParam ((ty, name), venv) = AM.insert(venv, name, ctype ty)
         val venv = foldl enterParam AM.empty params
         val say = say out
