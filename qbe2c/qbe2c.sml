@@ -2,6 +2,7 @@ structure Qbe2C =
 struct
 
   structure AM = AtomMap
+  structure AS = AtomSet
   structure T = QbeTypes
   structure PR32 = PackReal32Little
   structure PR64 = PackReal64Little
@@ -27,7 +28,8 @@ struct
     | ctype T.L = U64
     | ctype T.S = FLT
     | ctype T.D = DBL
-    | ctype _ = impossible "base type expected"
+    | ctype (T.Agg _) = U64
+    | ctype _ = impossible "unexpected type"
 
   val sameCty =
     fn (I32, I32) => true
@@ -48,8 +50,7 @@ struct
        | U64 => say "uint64_t"
        | FLT => say "float"
        | DBL => say "double"
-       | MEM(align, _) =>
-           (say "_Alignas("; say(Int.toString align); say ") uint8_t")
+       | MEM(i, _) => (say "_Alignas("; say(Int.toString i); say ") uint8_t")
     end
 
   local
@@ -115,6 +116,28 @@ struct
                     else impossible "type mismatch")
     | sayval out venv ty (T.Glo name) = sayid out name
     | sayval out venv ty (T.Con c) = saycon out ty c
+
+  fun trassign out venv (name, ty) = let
+        fun sayeq name = (sayid out name; say out " = ")
+        in
+          case (AM.lookup(venv, name), ctype ty)
+            of (U32, U64) => sayeq name
+             | (MEM _, U64) => sayeq name
+             | (U64, U32) => (say out "*(uint32_t *)&"; sayeq name)
+             | ts => if sameCty ts then sayeq name
+                     else impossible "type mismatch"
+        end
+
+  fun trphi out venv {temp=(name, ty), args} = let
+        val say = say out
+        val sayval = sayval out venv (ctype ty)
+        fun trargs [(_, v)] = sayval v
+          | trargs ((l, v)::args) =
+              (say "pred == "; sayid out l; say " ? "; sayval v;
+               say " : "; trargs args)
+        in
+          say "\t"; trassign out venv (name, ty); trargs args; say ";\n"
+        end
 
   fun trinstr out venv cls = let
     val ty = ctype cls
@@ -224,19 +247,6 @@ struct
        | T.Vaarg a => say "vaarg"
     end
 
-  fun trassign out venv (name, ty, ins) = let
-        val say = say out
-        fun sayeq name = (sayid out name; say " = ")
-        in
-          case (AM.lookup(venv, name), ctype ty)
-            of (U32, U64) => sayeq name
-             | (MEM _, U64) => sayeq name
-             | (U64, U32) => (say "*(uint32_t *)&"; sayeq name)
-             | ts => if sameCty ts then sayeq name
-                     else impossible "type mismatch";
-          trinstr out venv ty ins
-        end
-
   fun trstmt out venv stmt = let
         val say = say out
         in
@@ -244,7 +254,9 @@ struct
             of T.Assign(_, _, T.Alloc4 _) => ()
              | T.Assign(_, _, T.Alloc8 _) => ()
              | T.Assign(_, _, T.Alloc16 _) => ()
-             | T.Assign a => (say "\t"; trassign out venv a; say ";\n")
+             | T.Assign(name, ty, ins) =>
+                 (say "\t"; trassign out venv (name, ty);
+                  trinstr out venv ty ins; say ";\n")
              | T.Stored a => say "\tstore\n"
              | T.Stores a => say "\tstore\n"
              | T.Storel a => say "\tstore\n"
@@ -287,8 +299,8 @@ struct
   fun saydecs out venv [] = ()
     | saydecs out venv (decs as (_, ty)::_) = let
         val say = say out
-        fun saydec (name, MEM(_, v)) =
-              (sayid out name; say "["; sayval out venv U64 v; say "]")
+        fun saydec (name, MEM(_, n)) =
+              (sayid out name; say "["; sayval out venv U64 n; say "]")
           | saydec (name, _) = sayid out name
         fun loop [d] = saydec d
           | loop (d::ds) = (saydec d; say ", "; loop ds)
@@ -299,13 +311,18 @@ struct
     | trdef out (T.Function {name, params, result, blocks, ...}) = let
         val say = say out
         val sayty = sayty out
+        val sayid = sayid out
         fun sayparams [] = say "void"
-          | sayparams [(ty, name)] = (sayty(ctype ty); say " "; sayid out name)
+          | sayparams [(ty, name)] = (sayty(ctype ty); say " "; sayid name)
           | sayparams ((ty, name)::ps) =
-              (sayty(ctype ty); say " "; sayid out name; say ", "; sayparams ps)
-        fun trblk venv {label, phis=_, stmts, jump} =
-              (sayid out label; say ":\n";
+              (sayty(ctype ty); say " "; sayid name; say ", "; sayparams ps)
+        fun trblk venv plabs {label, phis, stmts, jump} =
+              (sayid label; say ":\n";
+               app (trphi out venv) phis;
                app (trstmt out venv) stmts;
+               if AS.member(plabs, label) then
+                 (say "\tpred = "; sayid label; say ";\n")
+               else ();
                Option.app (trjmp out venv result) jump)
         fun enterParam ((ty, name), venv) = AM.insert(venv, name, ctype ty)
         val venvp = foldl enterParam AM.empty params
@@ -317,13 +334,22 @@ struct
         val decGroups =
           map (fn f => List.filter (fn (_, t) => f t) (AM.listItemsi venvd))
             [ismem 4, ismem 8, ismem 16, isty U32, isty U64, isty FLT, isty DBL]
+        fun philabs ({temp, args}, ls) =
+              foldl (fn ((l, _), ls) => AS.add(ls, l)) ls args
+        val plabs =
+          foldl (fn ({phis, ...}, ls) => foldl philabs ls phis) AS.empty blocks
         in
           case result
             of NONE => say "void"
              | SOME ty => sayty(ctype ty);
-          say " "; sayid out name; say "("; sayparams params; say ") {\n";
+          say " "; sayid name; say "("; sayparams params; say ") {\n";
+          if AS.isEmpty plabs then () else
+            (say "\tenum {\n";
+             AS.app (fn l => (say "\t\t"; sayid l; say ",\n")) plabs;
+             say "\t};\n";
+             say "\tint pred;\n");
           app (saydecs out venv) decGroups;
-          app (trblk venv) blocks; say "}\n"
+          app (trblk venv plabs) blocks; say "}\n"
         end
     | trdef _ _ = ()
 
