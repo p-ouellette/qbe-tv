@@ -10,7 +10,8 @@ struct
   structure PW64 = PackWord64Little
   structure TIO = TextIO
 
-  datatype ctype = I32 | U32 | I64 | U64 | FLT | DBL | MEM of int * T.value
+  datatype ctype = I8 | U8 | I16 | U16 | I32 | U32 | I64 | U64 | FLT | DBL
+                 | MEM of int * T.value
 
   exception Impossible
 
@@ -32,7 +33,11 @@ struct
     | ctype _ = impossible "unexpected type"
 
   val sameCty =
-    fn (I32, I32) => true
+    fn (I8, I8) => true
+     | (U8, U8) => true
+     | (I16, I16) => true
+     | (U16, U16) => true
+     | (I32, I32) => true
      | (U32, U32) => true
      | (I64, I64) => true
      | (U64, U64) => true
@@ -44,7 +49,11 @@ struct
   fun sayty out = let
     val say = say out
     in
-      fn I32 => say "int32_t"
+      fn I8 => say "int8_t"
+       | U8 => say "uint8_t"
+       | I16 => say "int16_t"
+       | U16 => say "uint16_t"
+       | I32 => say "int32_t"
        | U32 => say "uint32_t"
        | I64 => say "int64_t"
        | U64 => say "uint64_t"
@@ -93,29 +102,25 @@ struct
             | saydbl (T.Fltd r) = sayr64 r
           in
             case ty
-              of I32 => (say "(int32_t)"; sayint c)
-               | U32 => (say "(uint32_t)"; sayint c)
-               | I64 => (say "(int64_t)"; sayint c)
-               | U64 => (say "(uint64_t)"; sayint c)
-               | FLT => (sayflt c; say "f")
+              of FLT => (sayflt c; say "f")
                | DBL => saydbl c
                | MEM _ => impossible "unexpected MEM type"
+               | _ => (say "("; sayty out ty; say ")"; sayint c)
           end
   end
 
-  fun sayval out venv ty (T.Tmp name) =
-        (case (ty, AM.lookup(venv, name))
-           of (I32, U32) => (say out "(int32_t)"; sayid out name)
-            | (I32, U64) => (say out "(int32_t)"; sayid out name)
-            | (I32, MEM _) => (say out "(int32_t)"; sayid out name)
-            | (U32, U64) => (say out "(uint32_t)"; sayid out name)
-            | (U32, MEM _) => (say out "(uint32_t)"; sayid out name)
-            | (I64, MEM _) => (say out "(int64_t)"; sayid out name)
-            | (U64, MEM _) => (say out "(uint64_t)"; sayid out name)
-            | ts => if sameCty ts then sayid out name
-                    else impossible "type mismatch")
+  fun sayval out venv ty (T.Tmp name) = let
+        val decty = AM.lookup(venv, name)
+        in
+          if sameCty(ty, decty) then sayid out name
+          else (say out "("; sayty out ty; say out ")"; sayid out name)
+        end
     | sayval out venv ty (T.Glo name) = sayid out name
     | sayval out venv ty (T.Con c) = saycon out ty c
+
+  fun saymemval out (T.Tmp a) = sayid out a
+    | saymemval out (T.Glo a) = sayid out a
+    | saymemval out (T.Con c) = saycon out U64 c
 
   fun trassign out venv (name, ty) = let
         fun sayeq name = (sayid out name; say out " = ")
@@ -154,6 +159,7 @@ struct
     val sayu64 = sayval U64
     val sayflt = sayval FLT
     val saydbl = sayval DBL
+    fun sayload ty v = (say "*("; sayty ty; say " *)"; saymemval out v)
     in
       fn T.Add(a, b) => (sayv a; say " + "; sayv b)
        | T.Sub(a, b) => (sayv a; say " - "; sayv b)
@@ -172,16 +178,16 @@ struct
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
        | T.Shl(a, b) => (sayv a; say " << "; say "("; sayu32 b;
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
-       | T.Loadd a => say "loadd"
-       | T.Loads a => say "loads"
-       | T.Loadl a => say "loadl"
-       | T.Loadw a => say "loadw"
-       | T.Loadsw a => say "loadsw"
-       | T.Loaduw a => say "loaduw"
-       | T.Loadsh a => say "loadsh"
-       | T.Loaduh a => say "loaduh"
-       | T.Loadsb a => say "loadsb"
-       | T.Loadub a => say "loadub"
+       | T.Loadd a => sayload DBL a
+       | T.Loads a => sayload FLT a
+       | T.Loadl a => sayload U64 a
+       | T.Loadw a => sayload I32 a
+       | T.Loadsw a => sayload I32 a
+       | T.Loaduw a => sayload U32 a
+       | T.Loadsh a => sayload I16 a
+       | T.Loaduh a => sayload U16 a
+       | T.Loadsb a => sayload I8 a
+       | T.Loadub a => sayload U8 a
        | T.Alloc4 _ => impossible "unexpected alloc"
        | T.Alloc8 _ => impossible "unexpected alloc"
        | T.Alloc16 _ => impossible "unexpected alloc"
@@ -228,11 +234,11 @@ struct
        | T.Dtosi a => (say "("; sayty sty; say ")"; saydbl a)
        | T.Dtoui a => (say "("; sayty ty; say ")"; saydbl a)
        | T.Exts a => sayflt a
-       | T.Extsb a => (say "(int8_t)"; sayu32 a)
-       | T.Extsh a => (say "(int16_t)"; sayu32 a)
+       | T.Extsb a => sayval I8 a
+       | T.Extsh a => sayval I16 a
        | T.Extsw a => sayi32 a
-       | T.Extub a => (say "(uint8_t)"; sayu32 a)
-       | T.Extuh a => (say "(uint16_t)"; sayu32 a)
+       | T.Extub a => sayval U8 a
+       | T.Extuh a => sayval U16 a
        | T.Extuw a => sayu32 a
        | T.Sltof a => (say "("; sayty ty; say ")"; sayi64 a)
        | T.Ultof a => (say "("; sayty ty; say ")"; sayu64 a)
@@ -247,24 +253,26 @@ struct
        | T.Vaarg a => say "vaarg"
     end
 
-  fun trstmt out venv stmt = let
+  fun trstmt out venv = let
         val say = say out
+        fun trstore ty (v, m) =
+              (say "\t*("; sayty out ty; say " *)"; saymemval out m; say " = ";
+               sayval out venv ty v; say ";\n")
         in
-          case stmt
-            of T.Assign(_, _, T.Alloc4 _) => ()
-             | T.Assign(_, _, T.Alloc8 _) => ()
-             | T.Assign(_, _, T.Alloc16 _) => ()
-             | T.Assign(name, ty, ins) =>
-                 (say "\t"; trassign out venv (name, ty);
-                  trinstr out venv ty ins; say ";\n")
-             | T.Stored a => say "\tstore\n"
-             | T.Stores a => say "\tstore\n"
-             | T.Storel a => say "\tstore\n"
-             | T.Storew a => say "\tstore\n"
-             | T.Storeh a => say "\tstore\n"
-             | T.Storeb a => say "\tstore\n"
-             | T.Call c => say "\tcall\n"
-             | T.Vastart v => say "\tvastart\n"
+          fn T.Assign(_, _, T.Alloc4 _) => ()
+           | T.Assign(_, _, T.Alloc8 _) => ()
+           | T.Assign(_, _, T.Alloc16 _) => ()
+           | T.Assign(name, ty, ins) =>
+               (say "\t"; trassign out venv (name, ty);
+                trinstr out venv ty ins; say ";\n")
+           | T.Stored a => trstore DBL a
+           | T.Stores a => trstore FLT a
+           | T.Storel a => trstore U64 a
+           | T.Storew a => trstore U32 a
+           | T.Storeh a => trstore U16 a
+           | T.Storeb a => trstore U8 a
+           | T.Call c => say "\tcall\n"
+           | T.Vastart v => say "\tvastart\n"
         end
 
   fun trjmp out venv rty = let
