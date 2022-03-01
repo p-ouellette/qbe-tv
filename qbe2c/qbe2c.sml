@@ -258,6 +258,10 @@ struct
         fun trstore ty (v, m) =
               (say "\t*("; sayty out ty; say " *)"; saymemval out m; say " = ";
                sayval out venv ty v; say ";\n")
+        fun trargs [] = ()
+          | trargs [(ty, v)] = sayval out venv (ctype ty) v
+          | trargs ((ty, v)::args) =
+              (sayval out venv (ctype ty) v; say ", "; trargs args)
         in
           fn T.Assign(_, _, T.Alloc4 _) => ()
            | T.Assign(_, _, T.Alloc8 _) => ()
@@ -271,7 +275,11 @@ struct
            | T.Storew a => trstore U32 a
            | T.Storeh a => trstore U16 a
            | T.Storeb a => trstore U8 a
-           | T.Call c => say "\tcall\n"
+           | T.Call {result=NONE, name, args, ...} =>
+               (say "\t"; sayid out name; say "("; trargs args; say ");\n")
+           | T.Call {result=SOME r, name, args, ...} =>
+               (say "\t"; trassign out venv r; sayid out name; say "(";
+                trargs args; say ");\n")
            | T.Vastart v => say "\tvastart\n"
         end
 
