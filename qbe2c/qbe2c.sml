@@ -178,6 +178,7 @@ struct
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
        | T.Shl(a, b) => (sayv a; say " << "; say "("; sayu32 b;
                          say (case cls of T.W => " & 31)" | T.L => " & 63)"))
+       | T.Load a => sayload ty a
        | T.Loadd a => sayload DBL a
        | T.Loads a => sayload FLT a
        | T.Loadl a => sayload U64 a
