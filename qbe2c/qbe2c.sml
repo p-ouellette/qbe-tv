@@ -343,13 +343,13 @@ struct
                Option.app (trjmp out venv result) jump)
         fun enterParam ((ty, name), venv) = AM.insert(venv, name, ctype ty)
         val venvp = foldl enterParam AM.empty params
-        val venvd = foldl enterDecs AM.empty blocks
-        val venv = AM.unionWith (fn (p, d) => p) (venvp, venvd)
+        val venv = foldl enterDecs venvp blocks
         fun ismem i (MEM(i', _)) = i = i'
           | ismem _ _ = false
         fun isty ty ty' = sameCty(ty, ty')
+        val decs = AM.mergeWith (fn (NONE, v) => v | _ => NONE) (venvp, venv)
         val decGroups =
-          map (fn f => List.filter (fn (_, t) => f t) (AM.listItemsi venvd))
+          map (fn f => List.filter (fn (_, t) => f t) (AM.listItemsi decs))
             [ismem 4, ismem 8, ismem 16, isty U32, isty U64, isty FLT, isty DBL]
         fun philabs ({temp, args}, ls) =
               foldl (fn ((l, _), ls) => AS.add(ls, l)) ls args
