@@ -1,0 +1,21 @@
+#!/bin/sh
+usage='usage: cproc-tv file.c [alive-tv-options]'
+
+set -e
+
+if [ $# = 0 ]
+then
+	echo "$usage"
+	exit 1
+fi
+
+c1=$1
+name1=$(basename "$1" .c)
+name2=$name1.tgt
+shift
+
+cproc-qbe "$c1" >"$name1.ssa"
+bin/qbe2c "$name1.ssa" >"$name2.c"
+clang -S -emit-llvm -fno-discard-value-names -o "$name1.ll" "$c1"
+clang -S -emit-llvm -fno-discard-value-names -o "$name2.ll" "$name2.c"
+alive-tv "$@" "$name1.ll" "$name2.ll"
